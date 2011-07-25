@@ -45,16 +45,13 @@
 #define TTY_MODE_KEY "tty_mode"
 
 #define AMRNB_DEVICE_IN "/dev/msm_amrnb_in"
-#define EVRC_DEVICE_IN "/dev/msm_evrc_in"
-#define QCELP_DEVICE_IN "/dev/msm_qcelp_in"
 #define AAC_DEVICE_IN "/dev/msm_aac_in"
 #define FM_DEVICE  "/dev/msm_fm"
 #define FM_A2DP_REC 1
 #define FM_FILE_REC 2
 
 #define AMRNB_FRAME_SIZE 32
-#define EVRC_FRAME_SIZE 23
-#define QCELP_FRAME_SIZE 35
+
 
 namespace android {
 
@@ -602,6 +599,7 @@ void AudioHardware::closeOutputStream(AudioStreamOut* out) {
     Mutex::Autolock lock(mLock);
     if (mOutput == 0 || mOutput != out) {
         LOGW("Attempt to close invalid output stream");
+		LOGI("Out: %s mOutput: %d", out, mOutput);
     }
     else {
         delete mOutput;
@@ -613,8 +611,10 @@ AudioStreamIn* AudioHardware::openInputStream(
         uint32_t devices, int *format, uint32_t *channels, uint32_t *sampleRate, status_t *status,
         AudioSystem::audio_in_acoustics acoustic_flags)
 {
+    LOGW("audio in");
     // check for valid input source
     if (!AudioSystem::isInputDevice((AudioSystem::audio_devices)devices)) {
+
         return 0;
     }
 
@@ -773,8 +773,6 @@ String8 AudioHardware::getParameters(const String8& keys)
     key = String8("tunneled-input-formats");
     if ( param.get(key,value) == NO_ERROR ) {
         param.addInt(String8("AMR"), true );
-        param.addInt(String8("QCELP"), true );
-        param.addInt(String8("EVRC"), true );
     }
     LOGV("AudioHardware::getParameters() %s", param.toString().string());
     return param.toString();
@@ -800,8 +798,6 @@ size_t AudioHardware::getInputBufferSize(uint32_t sampleRate, int format, int ch
 {
     if ((format != AudioSystem::PCM_16_BIT) &&
         (format != AudioSystem::AMR_NB)      &&
-        (format != AudioSystem::EVRC)      &&
-        (format != AudioSystem::QCELP)  &&
         (format != AudioSystem::AAC)){
         LOGW("getInputBufferSize bad format: %d", format);
         return 0;
@@ -813,12 +809,6 @@ size_t AudioHardware::getInputBufferSize(uint32_t sampleRate, int format, int ch
 
     if (format == AudioSystem::AMR_NB)
        return 320*channelCount;
-    if (format == AudioSystem::EVRC)
-       return 230*channelCount;
-    else if (format == AudioSystem::QCELP)
-       return 350*channelCount;
-    else if (format == AudioSystem::AAC)
-       return 2048;
     else
        return 2048*channelCount;
 }
@@ -1729,8 +1719,6 @@ status_t AudioHardware::AudioStreamInMSM72xx::set(
     if ((pFormat == 0) ||
         ((*pFormat != AUDIO_HW_IN_FORMAT) &&
          (*pFormat != AudioSystem::AMR_NB) &&
-         (*pFormat != AudioSystem::EVRC) &&
-         (*pFormat != AudioSystem::QCELP) &&
          (*pFormat != AudioSystem::AAC)))
     {
         *pFormat = AUDIO_HW_IN_FORMAT;
@@ -1892,145 +1880,6 @@ status_t AudioHardware::AudioStreamInMSM72xx::set(
         }
         mSampleRate = config.sample_rate;
         mBufferSize = config.buffer_size;
-    }
-    else if (*pFormat == AudioSystem::EVRC)
-    {
-          LOGI("Recording format: EVRC");
-          // open evrc input device
-          status = ::open(EVRC_DEVICE_IN, O_RDONLY);
-          if (status < 0) {
-              LOGE("Cannot open evrc device for read");
-              goto Error;
-          }
-          mFd = status;
-          mDevices = devices;
-          mChannels = *pChannels;
-
-          if (mDevices == AudioSystem::DEVICE_IN_VOICE_CALL)
-          {
-              if ((mChannels & AudioSystem::CHANNEL_IN_VOICE_DNLINK) &&
-                     (mChannels & AudioSystem::CHANNEL_IN_VOICE_UPLINK)) {
-                  LOGI("Recording Source: Voice Call Both Uplink and Downlink");
-                  voc_rec_cfg.rec_mode = VOC_REC_BOTH;
-              } else if (mChannels & AudioSystem::CHANNEL_IN_VOICE_DNLINK) {
-                  LOGI("Recording Source: Voice Call DownLink");
-                  voc_rec_cfg.rec_mode = VOC_REC_DOWNLINK;
-              } else if (mChannels & AudioSystem::CHANNEL_IN_VOICE_UPLINK) {
-                  LOGI("Recording Source: Voice Call UpLink");
-                  voc_rec_cfg.rec_mode = VOC_REC_UPLINK;
-              }
-
-              if (ioctl(mFd, AUDIO_SET_INCALL, &voc_rec_cfg))
-              {
-                 LOGE("Error: AUDIO_SET_INCALL failed\n");
-                 goto  Error;
-              }
-          }
-
-          /* Config param */
-          struct msm_audio_stream_config config;
-          if(ioctl(mFd, AUDIO_GET_STREAM_CONFIG, &config))
-          {
-            LOGE(" Error getting buf config param AUDIO_GET_STREAM_CONFIG \n");
-            goto  Error;
-          }
-
-          LOGV("The Config buffer size is %d", config.buffer_size);
-          LOGV("The Config buffer count is %d", config.buffer_count);
-
-          mSampleRate =8000;
-          mFormat = *pFormat;
-          mBufferSize = 230;
-          struct msm_audio_evrc_enc_config evrc_enc_cfg;
-
-          if (ioctl(mFd, AUDIO_GET_EVRC_ENC_CONFIG, &evrc_enc_cfg))
-          {
-            LOGE("Error: AUDIO_GET_EVRC_ENC_CONFIG failed\n");
-            goto  Error;
-          }
-
-          LOGV("The Config cdma_rate is %d", evrc_enc_cfg.cdma_rate);
-          LOGV("The Config min_bit_rate is %d", evrc_enc_cfg.min_bit_rate);
-          LOGV("The Config max_bit_rate is %d", evrc_enc_cfg.max_bit_rate);
-
-          evrc_enc_cfg.min_bit_rate = 4;
-          evrc_enc_cfg.max_bit_rate = 4;
-
-          if (ioctl(mFd, AUDIO_SET_EVRC_ENC_CONFIG, &evrc_enc_cfg))
-          {
-            LOGE("Error: AUDIO_SET_EVRC_ENC_CONFIG failed\n");
-            goto  Error;
-          }
-    }
-    else if (*pFormat == AudioSystem::QCELP)
-    {
-          LOGI("Recording format: QCELP");
-          // open qcelp input device
-          status = ::open(QCELP_DEVICE_IN, O_RDONLY);
-          if (status < 0) {
-              LOGE("Cannot open qcelp device for read");
-              goto Error;
-          }
-          mFd = status;
-          mDevices = devices;
-          mChannels = *pChannels;
-
-          if (mDevices == AudioSystem::DEVICE_IN_VOICE_CALL)
-          {
-              if ((mChannels & AudioSystem::CHANNEL_IN_VOICE_DNLINK) &&
-                  (mChannels & AudioSystem::CHANNEL_IN_VOICE_UPLINK)) {
-                  LOGI("Recording Source: Voice Call Both Uplink and Downlink");
-                  voc_rec_cfg.rec_mode = VOC_REC_BOTH;
-              } else if (mChannels & AudioSystem::CHANNEL_IN_VOICE_DNLINK) {
-                  LOGI("Recording Source: Voice Call DownLink");
-                  voc_rec_cfg.rec_mode = VOC_REC_DOWNLINK;
-              } else if (mChannels & AudioSystem::CHANNEL_IN_VOICE_UPLINK) {
-                  LOGI("Recording Source: Voice Call UpLink");
-                  voc_rec_cfg.rec_mode = VOC_REC_UPLINK;
-              }
-
-              if (ioctl(mFd, AUDIO_SET_INCALL, &voc_rec_cfg))
-              {
-                 LOGE("Error: AUDIO_SET_INCALL failed\n");
-                 goto  Error;
-              }
-          }
-
-          /* Config param */
-          struct msm_audio_stream_config config;
-          if(ioctl(mFd, AUDIO_GET_STREAM_CONFIG, &config))
-          {
-            LOGE(" Error getting buf config param AUDIO_GET_STREAM_CONFIG \n");
-            goto  Error;
-          }
-
-          LOGV("The Config buffer size is %d", config.buffer_size);
-          LOGV("The Config buffer count is %d", config.buffer_count);
-
-          mSampleRate =8000;
-          mFormat = *pFormat;
-          mBufferSize = 350;
-
-          struct msm_audio_qcelp_enc_config qcelp_enc_cfg;
-
-          if (ioctl(mFd, AUDIO_GET_QCELP_ENC_CONFIG, &qcelp_enc_cfg))
-          {
-            LOGE("Error: AUDIO_GET_QCELP_ENC_CONFIG failed\n");
-            goto  Error;
-          }
-
-          LOGV("The Config cdma_rate is %d", qcelp_enc_cfg.cdma_rate);
-          LOGV("The Config min_bit_rate is %d", qcelp_enc_cfg.min_bit_rate);
-          LOGV("The Config max_bit_rate is %d", qcelp_enc_cfg.max_bit_rate);
-
-          qcelp_enc_cfg.min_bit_rate = 4;
-          qcelp_enc_cfg.max_bit_rate = 4;
-
-          if (ioctl(mFd, AUDIO_SET_QCELP_ENC_CONFIG, &qcelp_enc_cfg))
-          {
-            LOGE("Error: AUDIO_SET_QCELP_ENC_CONFIG failed\n");
-            goto  Error;
-          }
     }
     else if (*pFormat == AudioSystem::AMR_NB)
     {
@@ -2309,7 +2158,7 @@ ssize_t AudioHardware::AudioStreamInMSM72xx::read( void* buffer, ssize_t bytes)
             }
         }
     }
-    else if ((mFormat == AudioSystem::EVRC) || (mFormat == AudioSystem::QCELP) || (mFormat == AudioSystem::AMR_NB))
+    else if (mFormat == AudioSystem::AMR_NB)
     {
         uint8_t readBuf[36];
         uint8_t *dataPtr;
@@ -2327,31 +2176,6 @@ ssize_t AudioHardware::AudioStreamInMSM72xx::read( void* buffer, ssize_t bytes)
                       mFirstread = true;
                       break;
                    }
-                }
-                else {
-                    dataPtr++;
-                    if (mFormat == AudioSystem::EVRC){
-                       memcpy(p, dataPtr, EVRC_FRAME_SIZE);
-                       p += EVRC_FRAME_SIZE;
-                       count -= EVRC_FRAME_SIZE;
-                       bytes += EVRC_FRAME_SIZE;
-                       if(!mFirstread)
-                       {
-                          mFirstread = true;
-                          break;
-                       }
-                    }
-                    else if (mFormat == AudioSystem::QCELP){
-                       memcpy(p, dataPtr, QCELP_FRAME_SIZE);
-                       p += QCELP_FRAME_SIZE;
-                       count -= QCELP_FRAME_SIZE;
-                       bytes += QCELP_FRAME_SIZE;
-                       if(!mFirstread)
-                       {
-                          mFirstread = true;
-                          break;
-                       }
-                    }
                 }
 
             } else {
