@@ -833,9 +833,9 @@ status_t AudioHardware::setVoiceVolume(float v)
         v = 1.0;
     }
 
-    int vol = lrint(v * 100.0);
+    int vol = lrint(v * 166.0);
     LOGD("setVoiceVolume(%f)\n", v);
-    LOGI("Setting in-call volume to %d (available range is 0 to 100)\n", vol);
+    LOGI("Setting in-call volume to %d (available range is 0 to 166)\n", vol);
 
     if(msm_set_voice_rx_vol(vol)) {
         LOGE("msm_set_voice_rx_vol(%d) failed errno = %d",vol,errno);
