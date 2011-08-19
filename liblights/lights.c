@@ -15,7 +15,7 @@
  */
 
 
-#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #define LOG_TAG "lights"
 
 #include <cutils/log.h>
@@ -84,6 +84,9 @@ char const*const BUTTON_FILE
 char const*const SLEEP_FILE
         = "/sys/module/RGB_led/parameters/off_when_suspended";
 
+char const*const BLN_FILE
+        = "/sys/module/RGB_led/parameters/backlight_notification";
+
 extern void huawei_oem_rapi_streaming_function(int,int,int,int,int *,int *,int *);
 
 /**
@@ -148,8 +151,6 @@ read_int(char const* path)
         return -errno;
     }
 }
-
-
 
 static int
 is_lit(struct light_state_t const* state)
@@ -226,7 +227,6 @@ set_light_buttons(struct light_device_t* dev,
     return err;
 }
 
-
 static int
 set_speaker_light_locked(struct light_device_t* dev,
         struct light_state_t const* state)
@@ -236,7 +236,9 @@ set_speaker_light_locked(struct light_device_t* dev,
     int blink, freq, pwm;
     int onMS, offMS;
     unsigned int colorRGB;
-
+	int v[3];
+	int charge = 0;
+	int bln = 0;
     switch (state->flashMode) {
         case LIGHT_FLASH_TIMED:
             onMS = state->flashOnMS;
@@ -246,12 +248,13 @@ set_speaker_light_locked(struct light_device_t* dev,
         default:
             onMS = 0;
             offMS = 0;
+			charge = 1;
             break;
     }
 
     colorRGB = state->color;
 
-#if 1
+#if 0
     LOGD("set_speaker_light_locked colorRGB=%08X, onMS=%d, offMS=%d\n",
             colorRGB, onMS, offMS);
 #endif
@@ -260,10 +263,19 @@ set_speaker_light_locked(struct light_device_t* dev,
     green = (colorRGB >> 8) & 0xFF;
     blue = colorRGB & 0xFF;
 
+	if(!charge) bln = read_int(BLN_FILE);
+
     if (!g_haveAmberLed) {
-        write_int(RED_LED_FILE, red);
-        write_int(GREEN_LED_FILE, green);
-        write_int(BLUE_LED_FILE, blue);
+		if(bln){
+			write_int(BUTTON_FILE, 255);
+			write_int(RED_LED_FILE, 0);
+		    write_int(GREEN_LED_FILE, 0);
+		    write_int(BLUE_LED_FILE, 0);
+		} else {
+		    write_int(RED_LED_FILE, red);
+		    write_int(GREEN_LED_FILE, green);
+		    write_int(BLUE_LED_FILE, blue);
+		}
     } else {
         /* all of related red led is replaced by amber */
         if (red) {
@@ -279,7 +291,6 @@ set_speaker_light_locked(struct light_device_t* dev,
     }
 
     if (onMS > 0 && offMS > 0) {
-	int v[3];
         int totalMS = onMS + offMS;
 
         // the LED appears to blink about once per second if freq is 20
@@ -295,23 +306,22 @@ set_speaker_light_locked(struct light_device_t* dev,
             pwm = 16;
 
         blink = 1;
-        LOGI("Blink %d %d",onMS,offMS);
-        v[0]=colorRGB;
-        v[1]=onMS/2;
-        v[2]=offMS;
-        if(read_int(SLEEP_FILE)==0)
+        if(read_int(SLEEP_FILE)==0 && !bln) {
+			v[0]=colorRGB;
+	        v[1]=onMS/2;
+	        v[2]=offMS;
             huawei_oem_rapi_streaming_function(0x26,0,0,0xc,v,0,0);
+		}
     } else {
-	int v[3];
         blink = 0;
         freq = 0;
         pwm = 0;
-        LOGI("No Blink");
-        v[0]=colorRGB;
-        v[1]=0;
-        v[2]=0;
-        if(read_int(SLEEP_FILE)==0)
+		if(read_int(SLEEP_FILE)==0 && !bln) {
+			v[0]=colorRGB;
+		    v[1]=0;
+		    v[2]=0;
             huawei_oem_rapi_streaming_function(0x26,0,0,0xc,v,0,0);
+		}
     }
 
     if (!g_haveAmberLed) {
