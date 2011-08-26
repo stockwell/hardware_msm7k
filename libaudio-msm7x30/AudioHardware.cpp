@@ -149,8 +149,32 @@ enum FM_STATE {
 
 FM_STATE fmState = FM_INVALID;
 static uint32_t fmDevice = INVALID_DEVICE;
-
 #define DEV_ID(X) device_list[X].dev_id
+
+static int
+read_int(char const* path)
+{
+    int fd;
+    static int already_warned = 0;
+    int value;
+
+    fd = open(path, O_RDONLY);
+    if (fd >= 0) {
+        char buffer[20];
+	int amt = read(fd, buffer, 20);
+        sscanf(buffer, "%d", &value);
+	LOGI("read %d from %s",value,path);
+        close(fd);
+        return amt == -1 ? -errno : value;
+    } else {
+        if (already_warned == 0) {
+            LOGE("read_int failed to open %s\n", path);
+            already_warned = 1;
+        }
+        return -errno;
+    }
+}
+
 void addToTable(int decoder_id,int device_id,int device_id_tx,int stream_type,bool active) {
     Routing_table* temp_ptr;
     Mutex::Autolock lock(mRoutingTableLock);
@@ -833,9 +857,12 @@ status_t AudioHardware::setVoiceVolume(float v)
         v = 1.0;
     }
 
-    int vol = lrint(v * 166.0);
+	int factor = read_int("/system/etc/volumefactor.txt");
+	if (!factor) factor = 120;
+
+    int vol = lrint(v * factor);
     LOGD("setVoiceVolume(%f)\n", v);
-    LOGI("Setting in-call volume to %d (available range is 0 to 166)\n", vol);
+    LOGI("Setting in-call volume to %d (available range is 0 to %d)\n", vol, factor);
 
     if(msm_set_voice_rx_vol(vol)) {
         LOGE("msm_set_voice_rx_vol(%d) failed errno = %d",vol,errno);
@@ -844,6 +871,7 @@ status_t AudioHardware::setVoiceVolume(float v)
     LOGV("msm_set_voice_rx_vol(%d) succeeded",vol);
     return NO_ERROR;
 }
+
 
 status_t AudioHardware::setFmVolume(float v)
 {
